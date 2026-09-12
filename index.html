@@ -6,9 +6,77 @@
     <meta name="theme-color" content="#f7f5ef" />
     <meta name="description" content="Spoločný nákupný zoznam pre domácnosť" />
     <title>Lístoček</title>
+
+    <script>
+      window.__listocekDiagnostics = []
+
+      function showDiagnostic(message) {
+        window.__listocekDiagnostics.push(message)
+
+        var box = document.getElementById('diagnostic-box')
+        if (!box) return
+
+        box.style.display = 'block'
+        box.textContent = window.__listocekDiagnostics.join('\n\n')
+      }
+
+      window.addEventListener('error', function (event) {
+        showDiagnostic(
+          'JAVASCRIPT ERROR\n' +
+          'Message: ' + event.message + '\n' +
+          'File: ' + event.filename + '\n' +
+          'Line: ' + event.lineno + ':' + event.colno
+        )
+      })
+
+      window.addEventListener('unhandledrejection', function (event) {
+        var reason = event.reason
+
+        showDiagnostic(
+          'UNHANDLED PROMISE ERROR\n' +
+          (reason && reason.stack
+            ? reason.stack
+            : String(reason))
+        )
+      })
+
+      window.addEventListener('DOMContentLoaded', function () {
+        setTimeout(function () {
+          var root = document.getElementById('root')
+
+          if (root && root.innerHTML.trim() === '') {
+            showDiagnostic(
+              'DIAGNOSTIKA\n' +
+              'HTML sa načítalo, ale React nič nevykreslil.\n' +
+              'User agent: ' + navigator.userAgent + '\n' +
+              'URL: ' + location.href
+            )
+          }
+        }, 4000)
+      })
+    </script>
   </head>
+
   <body>
+    <div
+      id="diagnostic-box"
+      style="
+        display:none;
+        margin:20px;
+        padding:16px;
+        border:2px solid #b00020;
+        border-radius:10px;
+        background:#fff0f0;
+        color:#700;
+        font-family:monospace;
+        font-size:13px;
+        white-space:pre-wrap;
+        word-break:break-word;
+      "
+    ></div>
+
     <div id="root"></div>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
