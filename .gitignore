@@ -3,3 +3,10 @@ dist
 .env
 .env.local
 *.log
+
+*.tsbuildinfo
+
+# This workspace also contains unrelated local Supabase migrations.
+supabase/migrations/*.sql
+!supabase/migrations/202609120001_initial_schema.sql
+
