@@ -4,10 +4,15 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   base: '/Listocek/',
+
+  build: {
+    target: 'es2018',
+  },
+
   plugins: [
     react(),
     VitePWA({
-      registerType: 'prompt',
+      registerType: 'autoUpdate',
       includeAssets: ['icon.svg'],
       manifest: {
         name: 'Lístoček',
@@ -18,7 +23,14 @@ export default defineConfig({
         display: 'standalone',
         start_url: '/Listocek/',
         scope: '/Listocek/',
-        icons: [{ src: '/Listocek/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }]
+        icons: [
+          {
+            src: '/Listocek/icon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any maskable'
+          }
+        ]
       },
       workbox: {
         navigateFallback: '/Listocek/index.html',
@@ -27,4 +39,3 @@ export default defineConfig({
     })
   ]
 })
-
