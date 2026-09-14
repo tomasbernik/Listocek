@@ -14,4 +14,7 @@ export type ProductHistory = {
   count: number
   lastUsed: string
   preferredShop?: Shop
+  preferredQuantity?: string
 }
+
+export type SyncStatus = 'local' | 'offline' | 'syncing' | 'synced' | 'error'

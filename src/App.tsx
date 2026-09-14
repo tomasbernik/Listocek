@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react'
-import { Check, ChevronDown, Copy, ListChecks, LoaderCircle, LogOut, Mail, Plus, RotateCcw, ShoppingBasket, Store, Trash2, Users, X } from 'lucide-react'
+import { AlertCircle, Check, ChevronDown, Cloud, CloudOff, Copy, ListChecks, LoaderCircle, LogOut, Mail, Plus, RefreshCw, ShoppingBasket, Store, Trash2, Users, X } from 'lucide-react'
 import { useShoppingList } from './useShoppingList'
 import type { Shop } from './types'
 
 const shops: Shop[] = ['Lidl', 'dm', 'Globus', 'Penny', 'Kaufland', 'Tesco', 'Iné']
 
 export default function App() {
-  const { items, suggestions, addItem, toggleItem, removeItem, clearChecked, household, memberCount, loading, error, authMessage, signedIn, isOnline, signInWithEmail, signOut, createHousehold, joinHousehold } = useShoppingList()
+  const { items, suggestions, addItem, toggleItem, removeItem, clearChecked, household, memberCount, loading, error, authMessage, signedIn, isOnline, syncStatus, pendingCount, retrySync, signInWithEmail, signOut, createHousehold, joinHousehold } = useShoppingList()
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState('')
   const [shop, setShop] = useState<Shop | ''>('')
@@ -25,9 +25,14 @@ export default function App() {
     })
     return [...groups.entries()]
   }, [active])
+  const visibleSuggestions = useMemo(() => {
+    const query = name.trim().toLocaleLowerCase('sk')
+    if (!query) return suggestions
+    return suggestions.filter(item => item.name.toLocaleLowerCase('sk').includes(query)).slice(0, 6)
+  }, [name, suggestions])
 
-  function submit(itemName = name, preferredShop: Shop | '' = shop) {
-    addItem(itemName, quantity, preferredShop || undefined)
+  function submit(itemName = name, preferredShop: Shop | '' = shop, preferredQuantity = quantity) {
+    addItem(itemName, preferredQuantity, preferredShop || undefined)
     setName(''); setQuantity(''); setShop(''); setDetailsOpen(false)
   }
 
@@ -74,13 +79,14 @@ export default function App() {
           </div>}
         </form>
 
-        {suggestions.length > 0 && <div className="suggestions">
-          <p>Často pridávate</p>
-          <div>{suggestions.map(item => <button key={item.name} onClick={() => submit(item.name, item.preferredShop ?? '')}><Plus size={14} />{item.name}</button>)}</div>
+        {visibleSuggestions.length > 0 && <div className="suggestions">
+          <p>{name.trim() ? 'Nájdené návrhy' : 'Často pridávate'}</p>
+          <div>{visibleSuggestions.map(item => <button key={item.name} onClick={() => submit(item.name, item.preferredShop ?? '', item.preferredQuantity ?? '')}><Plus size={14} /><span>{item.name}{(item.preferredQuantity || item.preferredShop) && <small>{[item.preferredQuantity, item.preferredShop].filter(Boolean).join(' · ')}</small>}</span></button>)}</div>
         </div>}
       </section>
 
       <section className="list-section">
+        {syncStatus === 'error' && error && <button className="sync-error" onClick={() => void retrySync()}><AlertCircle size={17} /><span>{error}</span><strong>Skúsiť znova</strong></button>}
         <div className="section-heading"><h2>Treba kúpiť</h2><span>{active.length} {active.length === 1 ? 'položka' : active.length < 5 ? 'položky' : 'položiek'}</span></div>
         {active.length === 0 ? <div className="empty-state"><div><ShoppingBasket size={36} /></div><h3>Zoznam je prázdny</h3><p>Vyzerá to, že máte všetko. Pridajte položku alebo vyberte z návrhov.</p></div> :
           <div className="groups">{grouped.map(([group, groupItems]) => <div className="shop-group" key={group}>
@@ -102,7 +108,13 @@ export default function App() {
         </div>}
       </section>
 
-      <footer><span className="status-dot" /> {isOnline ? 'Zoznam je synchronizovaný' : 'Lokálny režim'} <RotateCcw size={12} /></footer>
+      <footer className={`sync-status ${syncStatus}`}>
+        {syncStatus === 'local' && <><Cloud size={13} /> Lokálny režim</>}
+        {syncStatus === 'synced' && <><span className="status-dot" /> Zoznam je synchronizovaný</>}
+        {syncStatus === 'syncing' && <><RefreshCw className="spin" size={13} /> Synchronizujem{pendingCount ? ` (${pendingCount})` : '…'}</>}
+        {syncStatus === 'offline' && <><CloudOff size={13} /> Bez internetu · {pendingCount} {pendingCount === 1 ? 'zmena čaká' : 'zmien čaká'}</>}
+        {syncStatus === 'error' && <button onClick={() => void retrySync()}><AlertCircle size={13} /> Synchronizácia zlyhala · skúsiť znova</button>}
+      </footer>
       {membersOpen && <div className="modal-backdrop" onClick={() => setMembersOpen(false)}><section className="modal" onClick={e => e.stopPropagation()}>
         <button className="modal-close" onClick={() => setMembersOpen(false)}><X size={20} /></button><Users size={29} /><h2>Spoločný zoznam</h2>
         {isOnline && household ? <><p>Pošlite tento kód človeku, ktorého chcete pridať.</p><button className="invite-code" onClick={() => void navigator.clipboard.writeText(household.inviteCode)}><strong>{household.inviteCode}</strong><Copy size={17} /></button><small>{memberCount} {memberCount === 1 ? 'člen' : 'členovia'} zoznamu</small><button className="text-button" onClick={() => void signOut()}><LogOut size={14} />Odhlásiť sa</button></> : <p>Po pripojení Supabase tu bude pozývací kód pre ďalších členov.</p>}
