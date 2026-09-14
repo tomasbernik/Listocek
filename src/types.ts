@@ -7,7 +7,11 @@ export type ShoppingItem = {
   shop?: Shop
   checked: boolean
   createdAt: string
+  createdBy?: string
+  purchasedBy?: string
 }
+
+export type HouseholdMember = { userId: string; displayName: string }
 
 export type ProductHistory = {
   name: string

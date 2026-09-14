@@ -10,6 +10,7 @@ dist
 supabase/migrations/*.sql
 !supabase/migrations/202609120001_initial_schema.sql
 !supabase/migrations/202609140001_product_history_quantity.sql
+!supabase/migrations/202609140002_household_collaboration.sql
 
 # Generated local state from the Supabase CLI.
 supabase/.temp/
