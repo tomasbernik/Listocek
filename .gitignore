@@ -10,3 +10,6 @@ dist
 supabase/migrations/*.sql
 !supabase/migrations/202609120001_initial_schema.sql
 
+# Generated local state from the Supabase CLI.
+supabase/.temp/
+
