@@ -161,6 +161,21 @@ export function useShoppingList() {
   const updateMemberName = useCallback(async (displayName: string) => { const cleanName = displayName.trim(); if (!supabase || !household || !currentUserId || cleanName.length < 2) return; const { error: updateError } = await supabase.from('household_members').update({ display_name: cleanName }).eq('household_id', household.id).eq('user_id', currentUserId); if (updateError) setError(updateError.message); else setMembers(current => current.map(member => member.userId === currentUserId ? { ...member, displayName: cleanName } : member)) }, [currentUserId, household])
   const removeItem = useCallback(async (id: string) => { setItems(current => current.filter(i => i.id !== id)); if (supabase && household) { setQueue(current => [...current, { id: crypto.randomUUID(), type: 'remove', householdId: household.id, itemId: id }]); setSyncStatus(navigator.onLine ? 'syncing' : 'offline') } }, [household])
   const clearChecked = useCallback(async () => { const ids = items.filter(item => item.checked).map(item => item.id); setItems(current => current.filter(i => !i.checked)); if (supabase && household) { setQueue(current => [...current, ...ids.map(itemId => ({ id: crypto.randomUUID(), type: 'remove' as const, householdId: household.id, itemId }))]); setSyncStatus(navigator.onLine ? 'syncing' : 'offline') } }, [household, items])
+  const restoreItems = useCallback((restoredItems: ShoppingItem[]) => {
+    if (restoredItems.length === 0) return
+    setItems(current => {
+      const existingIds = new Set(current.map(item => item.id))
+      return [...restoredItems.filter(item => !existingIds.has(item.id)), ...current]
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    })
+    if (supabase && household) {
+      setQueue(current => [
+        ...current,
+        ...restoredItems.map(item => ({ id: crypto.randomUUID(), type: 'save' as const, householdId: household.id, item })),
+      ])
+      setSyncStatus(navigator.onLine ? 'syncing' : 'offline')
+    }
+  }, [household])
   const suggestions = useMemo(() => history.filter(p => !items.some(i => !i.checked && i.name.localeCompare(p.name, 'sk', { sensitivity: 'base' }) === 0)).sort((a, b) => b.count - a.count || b.lastUsed.localeCompare(a.lastUsed)).slice(0, 6), [history, items])
-  return { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, household, members, memberCount, currentUserId, updateMemberName, loading, error, authMessage, signedIn, isOnline: isSupabaseConfigured, syncStatus, pendingCount: queue.length, retrySync: flushQueue, signInWithEmail, signOut, createHousehold, joinHousehold }
+  return { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount, currentUserId, updateMemberName, loading, error, authMessage, signedIn, isOnline: isSupabaseConfigured, syncStatus, pendingCount: queue.length, retrySync: flushQueue, signInWithEmail, signOut, createHousehold, joinHousehold }
 }

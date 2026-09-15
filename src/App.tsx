@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, Check, ChevronDown, Cloud, CloudOff, Copy, ListChecks, LoaderCircle, LogOut, Mail, Plus, RefreshCw, ShoppingBasket, Store, Trash2, UserRound, Users, X } from 'lucide-react'
 import { useShoppingList } from './useShoppingList'
 import type { Shop, ShoppingItem } from './types'
@@ -6,7 +6,7 @@ import type { Shop, ShoppingItem } from './types'
 const shops: Shop[] = ['Lidl', 'dm', 'Globus', 'Penny', 'Kaufland', 'Tesco', 'Iné']
 
 export default function App() {
-  const { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, household, members, memberCount, currentUserId, updateMemberName, loading, error, authMessage, signedIn, isOnline, syncStatus, pendingCount, retrySync, signInWithEmail, signOut, createHousehold, joinHousehold } = useShoppingList()
+  const { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount, currentUserId, updateMemberName, loading, error, authMessage, signedIn, isOnline, syncStatus, pendingCount, retrySync, signInWithEmail, signOut, createHousehold, joinHousehold } = useShoppingList()
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState('')
   const [shop, setShop] = useState<Shop | ''>('')
@@ -20,6 +20,12 @@ export default function App() {
   const [editName, setEditName] = useState('')
   const [editQuantity, setEditQuantity] = useState('')
   const [editShop, setEditShop] = useState<Shop | ''>('')
+  const [undo, setUndo] = useState<{ message: string; items: ShoppingItem[] } | null>(null)
+  const undoTimer = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (undoTimer.current !== null) window.clearTimeout(undoTimer.current)
+  }, [])
 
   const active = items.filter(item => !item.checked)
   const checked = items.filter(item => item.checked)
@@ -54,6 +60,32 @@ export default function App() {
   function openMembers() {
     setProfileName(members.find(member => member.userId === currentUserId)?.displayName ?? '')
     setMembersOpen(true)
+  }
+
+  function offerUndo(message: string, removedItems: ShoppingItem[]) {
+    if (undoTimer.current !== null) window.clearTimeout(undoTimer.current)
+    setUndo({ message, items: removedItems })
+    undoTimer.current = window.setTimeout(() => setUndo(null), 5000)
+  }
+
+  function removeWithUndo(item: ShoppingItem) {
+    void removeItem(item.id)
+    offerUndo(`„${item.name}“ bolo odstránené`, [item])
+  }
+
+  function clearCheckedWithUndo() {
+    if (checked.length === 0) return
+    const removedItems = [...checked]
+    void clearChecked()
+    offerUndo(`${removedItems.length} ${removedItems.length === 1 ? 'položka bola odstránená' : removedItems.length < 5 ? 'položky boli odstránené' : 'položiek bolo odstránených'}`, removedItems)
+  }
+
+  function undoRemoval() {
+    if (!undo) return
+    restoreItems(undo.items)
+    setUndo(null)
+    if (undoTimer.current !== null) window.clearTimeout(undoTimer.current)
+    undoTimer.current = null
   }
 
   const memberNameFor = (userId?: string) => members.find(member => member.userId === userId)?.displayName
@@ -117,16 +149,16 @@ export default function App() {
             <div className="item-card">{groupItems.map(item => <div className="item" key={item.id}>
               <button className="checkbox" onClick={() => toggleItem(item.id)} aria-label={`Označiť ${item.name} ako kúpené`}><Check size={17} /></button>
               <button className="item-name" onClick={() => openEditor(item)} aria-label={`Upraviť ${item.name}`}><span>{item.name}{item.quantity && <small>{item.quantity}</small>}</span>{memberNameFor(item.createdBy) && <em>Pridal/a {memberNameFor(item.createdBy)}</em>}</button>
-              <button className="delete" onClick={() => removeItem(item.id)} aria-label={`Odstrániť ${item.name}`}><Trash2 size={17} /></button>
+              <button className="delete" onClick={() => removeWithUndo(item)} aria-label={`Odstrániť ${item.name}`}><Trash2 size={17} /></button>
             </div>)}</div>
           </div>)}</div>}
 
         {checked.length > 0 && <div className="checked-section">
-          <div className="section-heading"><h2>Kúpené</h2><button onClick={clearChecked}><Trash2 size={14} />Vymazať</button></div>
+          <div className="section-heading"><h2>Kúpené</h2><button onClick={clearCheckedWithUndo}><Trash2 size={14} />Vymazať</button></div>
           <div className="item-card">{checked.map(item => <div className="item is-checked" key={item.id}>
             <button className="checkbox" onClick={() => toggleItem(item.id)}><Check size={17} /></button>
             <button className="item-name" onClick={() => openEditor(item)} aria-label={`Upraviť ${item.name}`}><span>{item.name}{item.quantity && <small>{item.quantity}</small>}</span>{memberNameFor(item.purchasedBy) && <em>Kúpil/a {memberNameFor(item.purchasedBy)}</em>}</button>
-            <button className="delete" onClick={() => removeItem(item.id)}><Trash2 size={17} /></button>
+            <button className="delete" onClick={() => removeWithUndo(item)} aria-label={`Odstrániť ${item.name}`}><Trash2 size={17} /></button>
           </div>)}</div>
         </div>}
       </section>
@@ -157,6 +189,9 @@ export default function App() {
           <button className="primary-wide" disabled={!editName.trim()}>Uložiť zmeny</button>
         </form>
       </section></div>}
+      {undo && <div className="undo-toast" role="status" aria-live="polite">
+        <span>{undo.message}</span><button onClick={undoRemoval}>Vrátiť</button>
+      </div>}
     </main>
   )
 }
