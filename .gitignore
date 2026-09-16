@@ -5,12 +5,15 @@ dist
 *.log
 
 *.tsbuildinfo
+test-results/
+playwright-report/
 
 # This workspace also contains unrelated local Supabase migrations.
 supabase/migrations/*.sql
 !supabase/migrations/202609120001_initial_schema.sql
 !supabase/migrations/202609140001_product_history_quantity.sql
 !supabase/migrations/202609140002_household_collaboration.sql
+!supabase/migrations/202609160001_reliable_sync_and_households.sql
 
 # Generated local state from the Supabase CLI.
 supabase/.temp/
