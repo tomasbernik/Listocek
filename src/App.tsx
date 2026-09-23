@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Check, ChevronDown, Cloud, CloudOff, Copy, ListChecks, LoaderCircle, LogOut, Mail, Plus, RefreshCw, Share2, ShoppingBasket, Store, Trash2, UserRound, Users, X } from 'lucide-react'
+import { AlertCircle, Check, ChevronDown, Cloud, CloudOff, Copy, ListChecks, LogOut, Mail, Plus, RefreshCw, Share2, ShoppingBasket, Store, Trash2, UserRound, Users, X } from 'lucide-react'
 import { useShoppingList } from './useShoppingList'
+import AuthScreen from './AuthScreen'
 import { captureInvite, clearInvite, invitationUrl, normalizeInvite } from './invites'
 import type { Shop, ShoppingItem } from './types'
 
@@ -11,7 +12,7 @@ function normalizeSearch(value: string) {
 }
 
 export default function App() {
-  const { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount, currentUserId, updateMemberName, loading, error, authMessage, signedIn, isOnline, networkOnline, syncStatus, pendingCount, retrySync, signInWithEmail, signOut, createHousehold, joinHousehold, leaveHousehold, renameHousehold } = useShoppingList()
+  const { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount, currentUserId, updateMemberName, loading, error, authMessage, authError, authBusy, needsPassword, authenticate, savePassword, clearAuthFeedback, signedIn, isOnline, networkOnline, syncStatus, pendingCount, retrySync, signOut, createHousehold, joinHousehold, leaveHousehold, renameHousehold } = useShoppingList()
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState('')
   const [shop, setShop] = useState<Shop | ''>('')
@@ -21,7 +22,7 @@ export default function App() {
     try { return captureInvite(window.location.href, localStorage) }
     catch { return normalizeInvite(new URL(window.location.href).searchParams.get('invite')) }
   })
-  const [email, setEmail] = useState('')
+
   const [memberName, setMemberName] = useState('')
   const [profileName, setProfileName] = useState('')
   const [householdName, setHouseholdName] = useState('Náš nákup')
@@ -145,17 +146,11 @@ export default function App() {
 
   const memberNameFor = (userId?: string) => members.find(member => member.userId === userId)?.displayName
 
-  if (isOnline && ((loading && !household) || !signedIn)) return <main className="app-shell onboarding">
-    <div className="brand-mark large"><ListChecks size={32} /></div>
-    <p className="eyebrow">VITAJTE V APLIKÁCII</p><h1>Lístoček</h1>
-    {loading ? <div className="loading"><LoaderCircle className="spin" />Pripájam zoznam…</div> : <>
-      <p className="onboarding-copy">Zadajte svoj e-mail. Pošleme vám bezpečný prihlasovací odkaz bez hesla.</p>
-      {joinCode && <p className="invite-notice">Máte pozvanie do domácnosti. Kód bude po prihlásení predvyplnený.</p>}
-      {error && <p className="error-message">{error}</p>}
-      {authMessage ? <div className="success-message"><Mail size={23} /><strong>Skontrolujte e-mail</strong><span>{authMessage}</span><small>Túto stránku môžete zavrieť a otvoriť odkaz v e-maile.</small></div> : <form className="email-form" onSubmit={e => { e.preventDefault(); void signInWithEmail(email, normalizeInvite(joinCode)) }}><label htmlFor="email">E-mailová adresa</label><input id="email" type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="vas@email.sk" /><button className="primary-wide" disabled={!email.includes('@')}><Mail size={17} />Poslať prihlasovací odkaz</button></form>}
-    </>}
-  </main>
-
+  if (isOnline && ((loading && !household) || !signedIn || needsPassword)) return <AuthScreen
+    loading={loading && !signedIn} busy={authBusy} setup={signedIn && needsPassword}
+    inviteCode={normalizeInvite(joinCode)} error={authError || error} message={authMessage}
+    authenticate={authenticate} savePassword={savePassword} clearFeedback={clearAuthFeedback}
+  />
   if (isOnline && !household) return <main className="app-shell onboarding">
     <div className="brand-mark large"><ListChecks size={32} /></div><p className="eyebrow">VAŠA DOMÁCNOSŤ</p><h1>Spoločný zoznam</h1>
     <p className="onboarding-copy">{joinCode ? 'Pozývací kód je pripravený. Zadajte svoje meno a pripojte sa k rodine.' : 'Vytvorte nový nákupný zoznam alebo sa pripojte k existujúcemu.'}</p>

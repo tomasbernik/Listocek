@@ -4,7 +4,7 @@ const userId = '11111111-1111-4111-8111-111111111111'
 const home = { id: '22222222-2222-4222-8222-222222222222', name: 'U ocina', invite_code: 'AB12CD34' }
 const otherHome = { id: '33333333-3333-4333-8333-333333333333', name: 'Druhá rodina', invite_code: '1234ABCD' }
 const milk = { id: '44444444-4444-4444-8444-444444444444', name: 'Mlieko', quantity: null, shop: null, checked: false, created_at: '2026-09-16T10:00:00Z', created_by: userId, purchased_by: null }
-const session = { access_token: 'test-access-token', refresh_token: 'test-refresh-token', expires_at: Math.floor(Date.now() / 1000) + 86400, expires_in: 86400, token_type: 'bearer', user: { id: userId, email: 'oco@example.test', aud: 'authenticated', role: 'authenticated' } }
+const session = { access_token: 'test-access-token', refresh_token: 'test-refresh-token', expires_at: Math.floor(Date.now() / 1000) + 86400, expires_in: 86400, token_type: 'bearer', user: { id: userId, email: 'oco@example.test', aud: 'authenticated', role: 'authenticated', user_metadata: { listocek_password_set: true } } }
 
 async function prepare(page, options = {}) {
   const state = { household: options.noHousehold ? null : { ...home }, items: [{ ...milk }], failReads: false, operations: [], beforeSend: null, otpRedirect: '' }
@@ -14,7 +14,7 @@ async function prepare(page, options = {}) {
     Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => window.testOnline })
     Object.defineProperty(navigator, 'share', { configurable: true, value: async data => { window.sharedInvitation = data } })
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.copiedInvitation = text } } })
-  }, { session, signedIn: !options.signedOut })
+  }, { session: options.legacy ? { ...session, user: { ...session.user, user_metadata: {} } } : session, signedIn: !options.signedOut })
   await page.route('https://fonts.googleapis.com/**', route => route.abort())
   await page.routeWebSocket('wss://listocek-test.supabase.co/**', socket => {
     socket.onMessage(message => {
@@ -25,11 +25,13 @@ async function prepare(page, options = {}) {
   })
   await page.route('https://listocek-test.supabase.co/**', async route => {
     const request = route.request(), url = new URL(request.url())
-    const body = request.method() === 'POST' || request.method() === 'PATCH' ? request.postDataJSON() : null
+    const body = request.method() === 'POST' || request.method() === 'PATCH' || request.method() === 'PUT' ? request.postDataJSON() : null
     let data = null
     if (url.pathname.endsWith('/otp')) { state.otpRedirect = url.searchParams.get('redirect_to'); data = {} }
     else if (url.pathname.endsWith('/logout')) data = {}
-    else if (url.pathname.endsWith('/user')) data = session.user
+    else if (url.pathname.endsWith('/recover')) { state.recoveryRedirect = url.searchParams.get('redirect_to'); data = {} }
+    else if (url.pathname.endsWith('/token')) { state.login = body; data = session }
+    else if (url.pathname.endsWith('/user')) { if (request.method() === 'PUT') state.userUpdate = body; data = { ...session.user, user_metadata: { ...session.user.user_metadata, ...body?.data } } }
     else if (url.pathname.endsWith('/rpc/apply_shopping_operation')) {
       const operation = body.operation
       state.operations.push(operation)
@@ -61,11 +63,16 @@ test('invitation survives email login and joins the invited household', async ({
   const state = await prepare(page, { signedOut: true, noHousehold: true })
   await page.goto('?invite=AB12CD34')
   await page.getByLabel('E-mailová adresa').fill('oco@example.test')
-  await page.getByRole('button', { name: 'Poslať prihlasovací odkaz' }).click()
+  await page.getByRole('button', { name: 'Ešte nemám heslo' }).click()
+  await page.getByRole('button', { name: 'Poslať overovací odkaz' }).click()
   await expect(page.getByText('Skontrolujte e-mail')).toBeVisible()
   expect(state.otpRedirect).toContain('invite=AB12CD34')
   await page.evaluate(session => localStorage.setItem('sb-listocek-test-auth-token', JSON.stringify(session)), session)
-  await page.goto('/Listocek/')
+  await page.goto('/Listocek/?auth=password')
+  await page.getByLabel('Nové heslo', { exact: true }).fill('test-password-123')
+  await page.getByLabel('Zopakujte heslo').fill('test-password-123')
+  await page.getByRole('button', { name: 'Uložiť heslo a pokračovať' }).click()
+  expect(state.userUpdate.password).toBe('test-password-123')
   await expect(page.getByLabel('Pozývací kód')).toHaveValue('AB12CD34')
   await page.getByLabel('Ako sa voláte?').fill('Oco')
   await page.getByRole('button', { name: 'Pripojiť sa', exact: true }).click()
@@ -86,6 +93,75 @@ test('share menu, copy and email prepare the same invitation without sending a m
   await page.getByRole('button', { name: 'Zdieľať pozvanie' }).click()
   await expect(page.getByRole('status')).toContainText('Vyberte e-mail')
   await page.screenshot({ path: 'test-results/members-mobile.png', fullPage: true })
+})
+
+test('password login opens the saved household without sending an email', async ({ page }) => {
+  const state = await prepare(page, { signedOut: true })
+  await page.goto('./')
+  await page.getByLabel('E-mailová adresa').fill('oco@example.test')
+  await page.getByLabel('Heslo', { exact: true }).fill('existing-password')
+  await page.getByRole('button', { name: 'Prihlásiť sa', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toBeVisible()
+  expect(state.login).toMatchObject({ email: 'oco@example.test', password: 'existing-password' })
+  expect(state.otpRedirect).toBe('')
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toBeVisible()
+})
+
+test('wrong password remains on login and does not send email', async ({ page }) => {
+  const state = await prepare(page, { signedOut: true })
+  await page.route('**/auth/v1/token?**', route => route.fulfill({ status: 400, json: { code: 'invalid_credentials', msg: 'Invalid login credentials' } }))
+  await page.goto('./')
+  await page.getByLabel('E-mailová adresa').fill('oco@example.test')
+  await page.getByLabel('Heslo', { exact: true }).fill('wrong-password')
+  await page.getByRole('button', { name: 'Prihlásiť sa', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Nesprávny e-mail alebo heslo')
+  expect(state.otpRedirect).toBe('')
+  await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toHaveCount(0)
+})
+
+test('legacy session sets a password without another email and handles server rejection', async ({ page }) => {
+  const state = await prepare(page, { legacy: true })
+  await page.goto('./')
+  await page.getByLabel('Nové heslo', { exact: true }).fill('new-password')
+  await page.getByLabel('Zopakujte heslo').fill('new-password')
+  await page.route('**/auth/v1/user', async route => {
+    if (route.request().method() !== 'PUT') return route.fallback()
+    await route.fulfill({ status: 422, json: { code: 'weak_password', msg: 'Heslo je príliš slabé.' } })
+  })
+  await page.getByRole('button', { name: 'Uložiť heslo a pokračovať' }).click()
+  await expect(page.getByRole('alert')).toContainText('Heslo je príliš slabé')
+  await expect(page.getByLabel('Nové heslo', { exact: true })).toBeVisible()
+  await page.unroute('**/auth/v1/user')
+  await page.getByRole('button', { name: 'Uložiť heslo a pokračovať' }).click()
+  await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toBeVisible()
+  expect(state.otpRedirect).toBe('')
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toBeVisible()
+})
+
+test('recovery preserves invitation and requires matching passwords', async ({ page }) => {
+  const state = await prepare(page, { signedOut: true })
+  await page.goto('?invite=AB12CD34')
+  await page.getByRole('button', { name: 'Zabudnuté heslo', exact: true }).click()
+  await page.getByLabel('E-mailová adresa').fill('oco@example.test')
+  await page.getByRole('button', { name: 'Poslať odkaz na obnovu hesla' }).click()
+  await expect(page.getByRole('status')).toContainText('Ak účet existuje')
+  expect(state.recoveryRedirect).toContain('auth=password')
+  expect(state.recoveryRedirect).toContain('invite=AB12CD34')
+  await page.evaluate(session => localStorage.setItem('sb-listocek-test-auth-token', JSON.stringify(session)), session)
+  await page.goto('?auth=password')
+  await page.reload()
+  await page.getByLabel('Nové heslo', { exact: true }).fill('new-password')
+  await page.getByLabel('Zopakujte heslo').fill('different-password')
+  await page.getByRole('button', { name: 'Uložiť heslo a pokračovať' }).click()
+  await expect(page.getByRole('alert')).toContainText('Heslá sa nezhodujú')
+  expect(state.userUpdate).toBeUndefined()
+  await page.getByLabel('Zopakujte heslo').fill('new-password')
+  await page.getByRole('button', { name: 'Uložiť heslo a pokračovať' }).click()
+  await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toBeVisible()
+  expect(state.userUpdate.password).toBe('new-password')
+  expect(new URL(page.url()).searchParams.has('auth')).toBe(false)
 })
 
 test('a pending invitation remains available after leaving the old household', async ({ page }) => {

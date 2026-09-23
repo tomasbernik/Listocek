@@ -28,6 +28,10 @@ export function useShoppingList() {
   const [error, setError] = useState<string | null>(null)
   const [signedIn, setSignedIn] = useState(!isSupabaseConfigured || Boolean(read(HOUSEHOLD_KEY, null)))
   const [authMessage, setAuthMessage] = useState<string | null>(null)
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [authBusy, setAuthBusy] = useState(false)
+  const [needsPassword, setNeedsPassword] = useState(false)
+  const passwordFlow = useRef(new URL(window.location.href).searchParams.get('auth') === 'password' || new URLSearchParams(window.location.hash.slice(1)).get('type') === 'recovery')
   const [networkOnline, setNetworkOnline] = useState(navigator.onLine)
   const [sessionReady, setSessionReady] = useState(false)
   const [syncStatus, setSyncStatus] = useState<SyncStatus>(isSupabaseConfigured ? (navigator.onLine ? 'syncing' : 'offline') : 'local')
@@ -97,7 +101,7 @@ export function useShoppingList() {
       const { data, error: authError } = await supabase.auth.getSession()
       if (!guard.isCurrent(request)) return
       if (authError) throw authError
-      if (!data.session) { setSessionReady(false); setSignedIn(false); return }
+      if (!data.session) { setSessionReady(false); setSignedIn(false); setNeedsPassword(false); return }
       const userId = data.session.user.id
       if (userRef.current && userRef.current !== userId) {
         if (outbox.getSnapshot().length) throw new Error('Na tomto zariadení čakajú zmeny predchádzajúceho účtu. Prihláste sa pôvodným e-mailom a synchronizujte ich.')
@@ -106,6 +110,7 @@ export function useShoppingList() {
       }
       userRef.current = userId
       setCurrentUserId(userId); setSignedIn(true)
+      setNeedsPassword(passwordFlow.current || !data.session.user.user_metadata?.listocek_password_set)
       localStorage.setItem(USER_KEY, JSON.stringify(userId))
       setSessionReady(true)
       const { data: memberships, error: memberError } = await supabase.from('household_members').select('household_id').eq('user_id', userId).order('created_at', { ascending: true })
@@ -124,7 +129,10 @@ export function useShoppingList() {
   useEffect(() => {
     if (!supabase) return
     void loadHousehold()
-    const { data } = supabase.auth.onAuthStateChange(() => { window.setTimeout(() => void loadHousehold(), 0) })
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') { passwordFlow.current = true; setNeedsPassword(true) }
+      window.setTimeout(() => void loadHousehold(), 0)
+    })
     return () => { data.subscription.unsubscribe(); guard.invalidate() }
   }, [guard, loadHousehold])
 
@@ -304,25 +312,61 @@ export function useShoppingList() {
       return true
     } catch (cause) { setError(message(cause)); return false }
   }
-  const signInWithEmail = async (email: string, inviteCode = '') => {
-    if (!supabase) return
-    setLoading(true); setError(null); setAuthMessage(null)
+  const authenticate = async (mode: 'login' | 'register' | 'recover', email: string, password: string, inviteCode = '') => {
+    if (!supabase || authBusy) return
+    setAuthBusy(true); setAuthError(null); setAuthMessage(null)
     try {
+      if (mode === 'login') {
+        const { data, error: cause } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+        if (cause) throw cause
+        // A successful password login also works for passwords set by another app.
+        passwordFlow.current = false
+        const url = new URL(window.location.href)
+        url.searchParams.delete('auth'); window.history.replaceState(null, '', url)
+        if (!data.user.user_metadata?.listocek_password_set) {
+          const { error: metadataError } = await supabase.auth.updateUser({ data: { listocek_password_set: true } })
+          if (metadataError) throw metadataError
+        }
+        await loadHousehold()
+        return
+      }
       const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin)
+      redirectTo.searchParams.set('auth', 'password')
       if (inviteCode) redirectTo.searchParams.set('invite', inviteCode)
-      const { error: cause } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: redirectTo.href, shouldCreateUser: true } })
+      const { error: cause } = mode === 'recover'
+        ? await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: redirectTo.href })
+        : await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: redirectTo.href, shouldCreateUser: true } })
       if (cause) throw cause
-      setAuthMessage(`Prihlasovací odkaz sme poslali na ${email.trim()}.`)
-    } catch (cause) { setError(message(cause)) }
-    finally { setLoading(false) }
+      setAuthMessage(mode === 'recover' ? 'Ak účet existuje, dostanete odkaz na obnovenie hesla.' : `Na ${email.trim()} sme poslali odkaz. Po otvorení si nastavíte heslo.`)
+    } catch (cause) {
+      const invalidCredentials = (cause && typeof cause === 'object' && 'code' in cause && cause.code === 'invalid_credentials') || message(cause) === 'Invalid login credentials'
+      setAuthError(invalidCredentials ? 'Nesprávny e-mail alebo heslo.' : message(cause))
+    } finally { setAuthBusy(false) }
   }
+  const savePassword = async (password: string) => {
+    if (!supabase || authBusy) return false
+    setAuthBusy(true); setAuthError(null)
+    try {
+      if (password.length < 8) throw new Error('Heslo musí mať aspoň 8 znakov.')
+      const { error: cause } = await supabase.auth.updateUser({ password, data: { listocek_password_set: true } })
+      if (cause) throw cause
+      passwordFlow.current = false
+      const url = new URL(window.location.href)
+      url.searchParams.delete('auth'); window.history.replaceState(null, '', url)
+      setNeedsPassword(false); setAuthMessage(null)
+      await loadHousehold()
+      return true
+    } catch (cause) { setAuthError(message(cause)); return false }
+    finally { setAuthBusy(false) }
+  }
+  const clearAuthFeedback = () => { setAuthError(null); setAuthMessage(null) }
   const signOut = () => householdAction(async () => {
     if (!supabase) return
-    const { error: cause } = await supabase.auth.signOut()
+    const { error: cause } = await supabase.auth.signOut({ scope: 'local' })
     if (cause) throw cause
     clearHousehold(); userRef.current = null; localStorage.removeItem(USER_KEY)
-    setCurrentUserId(null); setSignedIn(false); setSessionReady(false); setAuthMessage(null)
+    setCurrentUserId(null); setSignedIn(false); setSessionReady(false); setAuthMessage(null); setNeedsPassword(false)
   })
   const suggestions = useMemo(() => history.filter(p => !items.some(i => !i.checked && i.name.localeCompare(p.name, 'sk', { sensitivity: 'base' }) === 0)).sort((a, b) => b.count - a.count || b.lastUsed.localeCompare(a.lastUsed)), [history, items])
-  return { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount: Math.max(1, members.length), currentUserId, updateMemberName, loading, error, authMessage, signedIn, isOnline: isSupabaseConfigured, networkOnline, syncStatus, pendingCount: queue.length, retrySync, signInWithEmail, signOut, createHousehold, joinHousehold, leaveHousehold, renameHousehold }
+  return { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount: Math.max(1, members.length), currentUserId, updateMemberName, loading, error, authMessage, authError, authBusy, needsPassword, authenticate, savePassword, clearAuthFeedback, signedIn, isOnline: isSupabaseConfigured, networkOnline, syncStatus, pendingCount: queue.length, retrySync, signOut, createHousehold, joinHousehold, leaveHousehold, renameHousehold }
 }

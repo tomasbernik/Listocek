@@ -22,7 +22,7 @@ Bez premenných prostredia aplikácia používa lokálny režim. Pre spoločný 
 - súkromné domácnosti s pozývacím kódom,
 - realtime synchronizácia cez Supabase Postgres Changes.
 
-Prihlásenie používa jednorazový e-mailový odkaz cez Supabase Auth. Produkčnú adresu aplikácie treba pridať v Supabase do **Authentication → URL Configuration → Redirect URLs**. Prístup k údajom povoľujú databázové RLS pravidlá len prihláseným členom domácnosti.
+Prvé prihlásenie používa overovací e-mailový odkaz cez Supabase Auth, po ktorom si používateľ nastaví heslo. Ďalšie prihlásenia používajú e-mail a heslo; e-mailový odkaz je potrebný už len pri zabudnutom hesle. Produkčnú adresu aplikácie treba pridať v Supabase do **Authentication → URL Configuration → Redirect URLs**. Prístup k údajom povoľujú databázové RLS pravidlá len prihláseným členom domácnosti.
 
 ## Domácnosti a pozvánky
 
@@ -49,3 +49,14 @@ pnpm build
 ```
 
 Jednotkové a databázové testy používajú dočasnú PostgreSQL databázu v pamäti cez PGlite. Prehliadačové testy vyžadujú nainštalovaný Chrome, spustia lokálny server na porte 4175 a používajú fiktívne Supabase odpovede. Nepripájajú sa k živej databáze a neposielajú e-maily ani správy. Skutočná ponuka systémového zdieľania a doručenie prihlasovacích e-mailov sa overujú na zariadení po nasadení.
+
+
+## Nasadenie prihlasovania heslom
+
+- Nie je potrebná nová SQL migrácia. Heslá spravuje Supabase Auth; aplikácia ich neukladá do localStorage ani do tabuliek domácností.
+- V Authentication → URL Configuration zachovajte existujúce adresy a doplňte `https://tomasbernik.github.io/Listocek/?auth=password` a `https://tomasbernik.github.io/Listocek/?auth=password&invite=*`. Nemeňte Site URL ostatných aplikácií. E-mailové šablóny musia používať Supabase ConfirmationURL, aby sa zachovalo presmerovanie.
+- Email provider musí byť povolený. Registrácia vyžaduje povolené vytváranie nových používateľov. Platí aj prípadná prísnejšia serverová politika hesiel.
+- Doterajší prihlásení používatelia dostanú výzvu na nastavenie hesla. Odhlásení používatelia bez hesla zvolia „Ešte nemám heslo“. Existujúce heslo z inej aplikácie rovnakého Supabase projektu možno použiť priamo.
+- Heslo patrí spoločnému Supabase účtu: jeho nastavenie alebo obnova mení heslo aj pre ďalšie aplikácie používajúce ten istý účet. Metadáta `listocek_password_set` slúžia iba na zobrazenie úvodnej obrazovky, nikdy na autorizáciu.
+- Odhlásenie používa scope `local`, takže Lístoček nezruší všetky ostatné relácie účtu. Ostatné aplikácie môžu stále používať globálne odhlasovanie. Predvolené úložisko existujúcich relácií ostáva zachované.
+- Po nasadení overte doručenie prvého aj obnovovacieho odkazu na telefóne, nastavenie hesla a následné prihlásenie heslom. Automatické testy používajú simulovaný Auth server, neposielajú skutočné e-maily.
