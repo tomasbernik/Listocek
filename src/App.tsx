@@ -27,7 +27,7 @@ function purchaseGroupTitle(value: string) {
 }
 
 export default function App() {
-  const { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount, currentUserId, updateMemberName, loading, error, authMessage, authError, authBusy, needsPassword, authenticate, savePassword, clearAuthFeedback, signedIn, isOnline, networkOnline, syncStatus, pendingCount, retrySync, signOut, createHousehold, joinHousehold, leaveHousehold, renameHousehold } = useShoppingList()
+  const { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount, currentUserId, updateMemberName, loading, error, authMessage, authError, authBusy, needsPassword, authenticate, registration, verifyRegistration, cancelRegistration, savePassword, clearAuthFeedback, signedIn, isOnline, networkOnline, syncStatus, pendingCount, retrySync, signOut, createHousehold, joinHousehold, leaveHousehold, renameHousehold } = useShoppingList()
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState('')
   const [shop, setShop] = useState<Shop | ''>('')
@@ -176,7 +176,8 @@ export default function App() {
 
   if (isOnline && ((loading && !household) || !signedIn || needsPassword)) return <AuthScreen
     loading={loading && !signedIn} busy={authBusy} setup={signedIn && needsPassword}
-    inviteCode={normalizeInvite(joinCode)} error={authError || error} message={authMessage}
+    inviteCode={normalizeInvite(joinCode)} error={authError} message={authMessage}
+    registration={registration} verifyRegistration={verifyRegistration} cancelRegistration={cancelRegistration}
     authenticate={authenticate} savePassword={savePassword} clearFeedback={clearAuthFeedback}
   />
   if (isOnline && !household) return <main className="app-shell onboarding">

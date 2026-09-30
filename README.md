@@ -22,7 +22,7 @@ Bez premenných prostredia aplikácia používa lokálny režim. Pre spoločný 
 - súkromné domácnosti s pozývacím kódom,
 - realtime synchronizácia cez Supabase Postgres Changes.
 
-Prvé prihlásenie používa overovací e-mailový odkaz cez Supabase Auth, po ktorom si používateľ nastaví heslo. Ďalšie prihlásenia používajú e-mail a heslo; e-mailový odkaz je potrebný už len pri zabudnutom hesle. Produkčnú adresu aplikácie treba pridať v Supabase do **Authentication → URL Configuration → Redirect URLs**. Prístup k údajom povoľujú databázové RLS pravidlá len prihláseným členom domácnosti.
+Prvé prihlásenie používa jednorazový číselný kód zaslaný samostatnou funkciou Lístočka cez existujúce SMTP STRATO. Používateľ zadá kód priamo v aplikácii a nastaví si heslo. Ďalšie prihlásenia používajú e-mail a heslo; e-mailový odkaz ostáva pri zabudnutom hesle. Pred nasadením frontendu dokončite postup v časti „Nasadenie registrácie kódom“. Prístup k údajom povoľujú databázové RLS pravidlá len prihláseným členom domácnosti.
 
 ## Domácnosti a pozvánky
 
@@ -51,12 +51,50 @@ pnpm build
 Jednotkové a databázové testy používajú dočasnú PostgreSQL databázu v pamäti cez PGlite. Prehliadačové testy vyžadujú nainštalovaný Chrome, spustia lokálny server na porte 4175 a používajú fiktívne Supabase odpovede. Nepripájajú sa k živej databáze a neposielajú e-maily ani správy. Skutočná ponuka systémového zdieľania a doručenie prihlasovacích e-mailov sa overujú na zariadení po nasadení.
 
 
-## Nasadenie prihlasovania heslom
+## Prihlasovanie heslom a obnova
 
-- Nie je potrebná nová SQL migrácia. Heslá spravuje Supabase Auth; aplikácia ich neukladá do localStorage ani do tabuliek domácností.
+- Heslá spravuje Supabase Auth; aplikácia ich neukladá do localStorage ani do tabuliek domácností. Registrácia kódom vyžaduje migráciu uvedenú nižšie.
 - V Authentication → URL Configuration zachovajte existujúce adresy a doplňte `https://tomasbernik.github.io/Listocek/?auth=password` a `https://tomasbernik.github.io/Listocek/?auth=password&invite=*`. Nemeňte Site URL ostatných aplikácií. E-mailové šablóny musia používať Supabase ConfirmationURL, aby sa zachovalo presmerovanie.
 - Email provider musí byť povolený. Registrácia vyžaduje povolené vytváranie nových používateľov. Platí aj prípadná prísnejšia serverová politika hesiel.
-- Doterajší prihlásení používatelia dostanú výzvu na nastavenie hesla. Odhlásení používatelia bez hesla zvolia „Ešte nemám heslo“. Existujúce heslo z inej aplikácie rovnakého Supabase projektu možno použiť priamo.
+- Doterajší prihlásení používatelia bez metadát o nastavení hesla dostanú výzvu na nastavenie hesla. Odhlásení používatelia bez hesla zvolia „Vytvoriť účet / ešte nemám heslo“. Existujúce heslo z inej aplikácie rovnakého Supabase projektu možno použiť priamo.
 - Heslo patrí spoločnému Supabase účtu: jeho nastavenie alebo obnova mení heslo aj pre ďalšie aplikácie používajúce ten istý účet. Metadáta `listocek_password_set` slúžia iba na zobrazenie úvodnej obrazovky, nikdy na autorizáciu.
 - Odhlásenie používa scope `local`, takže Lístoček nezruší všetky ostatné relácie účtu. Ostatné aplikácie môžu stále používať globálne odhlasovanie. Predvolené úložisko existujúcich relácií ostáva zachované.
-- Po nasadení overte doručenie prvého aj obnovovacieho odkazu na telefóne, nastavenie hesla a následné prihlásenie heslom. Automatické testy používajú simulovaný Auth server, neposielajú skutočné e-maily.
+- Po nasadení overte doručenie registračného kódu aj obnovovacieho odkazu na telefóne, nastavenie hesla a následné prihlásenie heslom. Automatické testy používajú simulovaný Auth server, neposielajú skutočné e-maily.
+
+## Nasadenie registrácie kódom
+
+Táto zmena nemení spoločné Auth nastavenia, SMTP, Site URL ani e-mailové šablóny Supabase projektu. Odosielanie je v samostatnej Edge Function `listocek-register`. Obnova hesla zostáva cez pôvodný Supabase e-mailový odkaz.
+
+1. Použite existujúcu poštovú schránku STRATO. Pripravte si rovnaké SMTP používateľské meno a heslo, aké používate v Supabase Auth. Heslo z maskovaného poľa nemožno skopírovať; použite svoje uložené heslo schránky. Spoločné SMTP nastavenia ani heslo schránky kvôli tomuto kroku nemeňte. Nie je potrebná nová služba ani doména.
+2. V Supabase SQL Editore spustite **iba** `supabase/migrations/202609300001_registration_email_limits.sql`. Existujúce migrácie vrátane času nákupu musia byť už aplikované. Nová migrácia pridáva izolované limity odosielania. Nepoužívajte hromadné `db push` na zdieľaný projekt bez kontroly jeho migračnej histórie.
+3. V Supabase → Edge Functions → Secrets nastavte:
+
+   | Názov | Hodnota |
+   | --- | --- |
+   | `LISTOCEK_SMTP_HOST` | `smtp.strato.de` |
+   | `LISTOCEK_SMTP_PORT` | `465` (šifrované TLS spojenie) |
+   | `LISTOCEK_SMTP_USER` | Rovnaká hodnota ako Username v existujúcich SMTP nastaveniach |
+   | `LISTOCEK_SMTP_PASSWORD` | Heslo tejto poštovej schránky |
+   | `LISTOCEK_EMAIL_FROM` | `Lístoček <ADRESA_SCHRANKY>` — nahraďte adresou existujúceho SMTP odosielateľa |
+   | `LISTOCEK_ALLOWED_ORIGINS` | `https://tomasbernik.github.io` (origin bez cesty `/Listocek/`; pri inej doméne upravte) |
+
+   SMTP údaje z Auth sa do Edge Functions automaticky neprenášajú; preto ich funkcia potrebuje ako samostatné secrets. `SUPABASE_URL` a `SUPABASE_SERVICE_ROLE_KEY` poskytuje nasadenej funkcii Supabase automaticky. Žiadne serverové tajomstvá nevkladajte do `VITE_*`, GitHub Pages ani do repozitára. Pre lokálny frontend možno do zoznamu origins pridať adresu oddelenú čiarkou, napr. `http://127.0.0.1:4175`.
+
+4. Pomocou prihláseného Supabase CLI nasaďte **iba túto funkciu** do správneho projektu:
+
+   ```bash
+   supabase functions deploy listocek-register --project-ref YOUR_PROJECT_REF --no-verify-jwt
+   ```
+
+   Funkcia je dostupná pred prihlásením, preto má iba ona `verify_jwt = false` v `supabase/config.toml`. Vo webovom editore Supabase možno namiesto CLI vytvoriť funkciu rovnakého názvu, vložiť oba súbory `index.ts` a `handler.ts` a vypnúť JWT kontrolu iba tejto funkcii.
+
+5. Až potom nasaďte frontend. Existujúce `VITE_SUPABASE_URL` a `VITE_SUPABASE_ANON_KEY` sa nemenia.
+6. Overte registráciu novým e-mailom: doručenie kódu → zadanie kódu → nastavenie hesla → vytvorenie/pripojenie domácnosti → odhlásenie → prihlásenie heslom. Overte nesprávny kód, nové odoslanie po minúte a obnovenie stránky pred zadaním kódu. Na existujúcom účte overte aj pôvodné prihlasovanie a obnovu hesla.
+
+Funkcia vygeneruje Supabase OTP cez serverové `admin.generateLink` a odošle iba číselný kód cez existujúce SMTP STRATO. Odkaz, kód ani administrátorské údaje nevracia prehliadaču a neloguje ich. Klient overuje kód cez `verifyOtp(type: 'email')`; platnosť, jednorazovosť a limity overovania riadi existujúca konfigurácia Supabase. UI podporuje 6–10 číslic, aby nebolo nutné meniť spoločnú dĺžku OTP. Po obnovení stránky sa uchová iba e-mail a čas ďalšieho odoslania v sessionStorage, nie kód alebo heslo.
+
+Odosielanie má databázový limit 1 požiadavka za 60 sekúnd a 5 za hodinu na adresu, spolu najviac 100 za hodinu pre Lístoček. Počítajú sa aj neúspešné pokusy; pri nedostupnej databáze sa kód neposiela. Záznamy obsahujú hash adresy, sú neprístupné pre `anon` aj `authenticated` a staré záznamy sa priebežne čistia. Povolené origins sú kontrola prehliadača, nie náhrada limitov proti zneužitiu.
+
+Účty a ich heslá sú stále spoločné pre Supabase projekt. Táto funkcia používa administrátorské generovanie OTP a umožňuje vytvárať účty nezávisle od bežnej verejnej signup cesty; jej nasadenie je preto vedomým povolením registrácie pre Lístoček. Generovanie ďalšieho kódu môže nahradiť čakajúci Auth kód rovnakého účtu aj z inej aplikácie. Úplná izolácia účtov a tokenov by vyžadovala samostatný Auth projekt. Existujúci účet s `listocek_password_set` po overení pokračuje bez vynútenej zmeny hesla.
+
+Referencie: [Supabase generateLink](https://supabase.com/docs/reference/javascript/auth-admin-generatelink), [Supabase verifyOtp](https://supabase.com/docs/reference/javascript/auth-verifyotp), [Supabase príklad SMTP funkcie](https://github.com/supabase/supabase/blob/master/examples/edge-functions/supabase/functions/send-email-smtp/index.ts), [Nodemailer SMTP](https://nodemailer.com/smtp).

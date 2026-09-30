@@ -27,7 +27,9 @@ async function prepare(page, options = {}) {
     const request = route.request(), url = new URL(request.url())
     const body = request.method() === 'POST' || request.method() === 'PATCH' || request.method() === 'PUT' ? request.postDataJSON() : null
     let data = null
-    if (url.pathname.endsWith('/otp')) { state.otpRedirect = url.searchParams.get('redirect_to'); data = {} }
+    if (url.pathname.endsWith('/functions/v1/listocek-register')) { state.registration = body; state.codeRequests = (state.codeRequests ?? 0) + 1; data = { sent: true } }
+    else if (url.pathname.endsWith('/verify')) { state.verification = body; data = { ...session, user: { ...session.user, user_metadata: {} } } }
+    else if (url.pathname.endsWith('/otp')) { state.otpRedirect = url.searchParams.get('redirect_to'); data = {} }
     else if (url.pathname.endsWith('/logout')) data = {}
     else if (url.pathname.endsWith('/recover')) { state.recoveryRedirect = url.searchParams.get('redirect_to'); data = {} }
     else if (url.pathname.endsWith('/token')) { state.login = body; data = session }
@@ -59,16 +61,20 @@ async function prepare(page, options = {}) {
   return state
 }
 
-test('invitation survives email login and joins the invited household', async ({ page }) => {
+test('registration code survives reload, sets a password and preserves the household invitation', async ({ page }) => {
   const state = await prepare(page, { signedOut: true, noHousehold: true })
   await page.goto('?invite=AB12CD34')
   await page.getByLabel('E-mailová adresa').fill('oco@example.test')
-  await page.getByRole('button', { name: 'Ešte nemám heslo' }).click()
-  await page.getByRole('button', { name: 'Poslať overovací odkaz' }).click()
-  await expect(page.getByText('Skontrolujte e-mail')).toBeVisible()
-  expect(state.otpRedirect).toContain('invite=AB12CD34')
-  await page.evaluate(session => localStorage.setItem('sb-listocek-test-auth-token', JSON.stringify(session)), session)
-  await page.goto('/Listocek/?auth=password')
+  await page.getByRole('button', { name: 'Vytvoriť účet / ešte nemám heslo' }).click()
+  await page.getByRole('button', { name: 'Poslať overovací kód' }).click()
+  await expect(page.getByLabel('Overovací kód')).toBeVisible()
+  await page.screenshot({ path: 'test-results/registration-code-mobile.png', fullPage: true })
+  expect(state.registration).toEqual({ email: 'oco@example.test' })
+  expect(state.otpRedirect).toBe('')
+  await page.reload()
+  await page.getByLabel('Overovací kód').fill('123456')
+  await page.getByRole('button', { name: 'Overiť kód', exact: true }).click()
+  expect(state.verification).toMatchObject({ email: 'oco@example.test', token: '123456', type: 'email' })
   await page.getByLabel('Nové heslo', { exact: true }).fill('test-password-123')
   await page.getByLabel('Zopakujte heslo').fill('test-password-123')
   await page.getByRole('button', { name: 'Uložiť heslo a pokračovať' }).click()
@@ -78,6 +84,44 @@ test('invitation survives email login and joins the invited household', async ({
   await page.getByRole('button', { name: 'Pripojiť sa', exact: true }).click()
   await expect(page.locator('.brand-title .eyebrow')).toHaveText('U ocina')
   expect(await page.evaluate(() => localStorage.getItem('listocek.pending-invite'))).toBeNull()
+})
+
+test('invalid code can be retried, resend is delayed and email can be corrected', async ({ page }) => {
+  const state = await prepare(page, { signedOut: true })
+  await page.goto('./')
+  await page.getByRole('button', { name: 'Vytvoriť účet / ešte nemám heslo' }).click()
+  await page.getByLabel('E-mailová adresa').fill('new@example.test')
+  await page.getByRole('button', { name: 'Poslať overovací kód' }).click()
+  await expect(page.getByRole('button', { name: /Poslať nový kód/ })).toBeDisabled()
+  await page.route('**/auth/v1/verify', route => route.fulfill({ status: 403, json: { code: 'otp_expired', msg: 'Token has expired or is invalid' } }))
+  await page.getByLabel('Overovací kód').fill('999999')
+  await page.getByRole('button', { name: 'Overiť kód', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Kód je nesprávny alebo vypršal')
+  await expect(page.getByLabel('Nové heslo', { exact: true })).toHaveCount(0)
+  await page.evaluate(() => {
+    const pending = JSON.parse(sessionStorage.getItem('listocek.registration'))
+    pending.resendAt = Date.now() - 1
+    sessionStorage.setItem('listocek.registration', JSON.stringify(pending))
+  })
+  await page.reload()
+  await page.getByRole('button', { name: 'Poslať nový kód', exact: true }).click()
+  await expect.poll(() => state.codeRequests).toBe(2)
+  await expect(page.getByRole('button', { name: /Poslať nový kód/ })).toBeDisabled()
+  await page.getByRole('button', { name: 'Zmeniť e-mail' }).click()
+  await expect(page.getByLabel('E-mailová adresa')).toHaveValue('new@example.test')
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  expect(await page.evaluate(() => sessionStorage.getItem('listocek.registration'))).toBeNull()
+})
+
+test('failed code delivery stays on email entry and reports a useful error', async ({ page }) => {
+  await prepare(page, { signedOut: true })
+  await page.route('**/functions/v1/listocek-register', route => route.fulfill({ status: 503, json: { error: 'Kód sa nepodarilo odoslať. Skúste to o chvíľu znova.' } }))
+  await page.goto('./')
+  await page.getByRole('button', { name: 'Vytvoriť účet / ešte nemám heslo' }).click()
+  await page.getByLabel('E-mailová adresa').fill('new@example.test')
+  await page.getByRole('button', { name: 'Poslať overovací kód' }).click()
+  await expect(page.getByRole('alert')).toContainText('Kód sa nepodarilo odoslať')
+  await expect(page.getByLabel('Overovací kód')).toHaveCount(0)
 })
 
 test('share menu, copy and email prepare the same invitation without sending a message', async ({ page }) => {

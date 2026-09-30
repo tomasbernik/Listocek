@@ -1,0 +1,3 @@
+# Only this unauthenticated registration endpoint is affected.
+[functions.listocek-register]
+verify_jwt = false

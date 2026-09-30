@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { isSupabaseConfigured, supabase } from './supabase'
+import { readRegistration, sendRegistrationCode, storeRegistration } from './registration'
 import { applyPending, Outbox, SnapshotGuard } from './sync'
 import type { PendingOperation } from './sync'
 import type { HouseholdMember, ProductHistory, Shop, ShoppingItem, SyncStatus } from './types'
@@ -30,6 +31,7 @@ export function useShoppingList() {
   const [authMessage, setAuthMessage] = useState<string | null>(null)
   const [authError, setAuthError] = useState<string | null>(null)
   const [authBusy, setAuthBusy] = useState(false)
+  const [registration, setRegistration] = useState(readRegistration)
   const [needsPassword, setNeedsPassword] = useState(false)
   const passwordFlow = useRef(new URL(window.location.href).searchParams.get('auth') === 'password' || new URLSearchParams(window.location.hash.slice(1)).get('type') === 'recovery')
   const [networkOnline, setNetworkOnline] = useState(navigator.onLine)
@@ -319,6 +321,7 @@ export function useShoppingList() {
       if (mode === 'login') {
         const { data, error: cause } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
         if (cause) throw cause
+        storeRegistration(null); setRegistration(null)
         // A successful password login also works for passwords set by another app.
         passwordFlow.current = false
         const url = new URL(window.location.href)
@@ -330,18 +333,44 @@ export function useShoppingList() {
         await loadHousehold()
         return
       }
+      if (mode === 'register') {
+        const normalizedEmail = email.trim().toLowerCase()
+        if (registration?.email === normalizedEmail && registration.resendAt > Date.now()) {
+          throw new Error('Pred poslaním nového kódu počkajte jednu minútu.')
+        }
+        await sendRegistrationCode(normalizedEmail)
+        const pending = { email: normalizedEmail, resendAt: Date.now() + 60000 }
+        storeRegistration(pending); setRegistration(pending)
+        return
+      }
       const redirectTo = new URL(import.meta.env.BASE_URL, window.location.origin)
       redirectTo.searchParams.set('auth', 'password')
       if (inviteCode) redirectTo.searchParams.set('invite', inviteCode)
-      const { error: cause } = mode === 'recover'
-        ? await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: redirectTo.href })
-        : await supabase.auth.signInWithOtp({ email: email.trim(), options: { emailRedirectTo: redirectTo.href, shouldCreateUser: true } })
+      const { error: cause } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: redirectTo.href })
       if (cause) throw cause
-      setAuthMessage(mode === 'recover' ? 'Ak účet existuje, dostanete odkaz na obnovenie hesla.' : `Na ${email.trim()} sme poslali odkaz. Po otvorení si nastavíte heslo.`)
+      setAuthMessage('Ak účet existuje, dostanete odkaz na obnovenie hesla.')
     } catch (cause) {
       const invalidCredentials = (cause && typeof cause === 'object' && 'code' in cause && cause.code === 'invalid_credentials') || message(cause) === 'Invalid login credentials'
       setAuthError(invalidCredentials ? 'Nesprávny e-mail alebo heslo.' : message(cause))
     } finally { setAuthBusy(false) }
+  }
+  const verifyRegistration = async (code: string) => {
+    if (!supabase || authBusy || !registration) return
+    setAuthBusy(true); setAuthError(null)
+    try {
+      const token = code.replace(/\s/g, '')
+      if (!/^\d{6,10}$/.test(token)) throw new Error('Zadajte celý číselný kód z e-mailu.')
+      const { data, error: cause } = await supabase.auth.verifyOtp({ email: registration.email, token, type: 'email' })
+      if (cause || !data.session) throw new Error(cause?.status === 429
+        ? 'Príliš veľa pokusov. Počkajte chvíľu a skúste to znova.'
+        : 'Kód je nesprávny alebo vypršal. Skúste ho znova alebo si pošlite nový.')
+      storeRegistration(null); setRegistration(null); setAuthMessage(null)
+      await loadHousehold()
+    } catch (cause) { setAuthError(message(cause)) }
+    finally { setAuthBusy(false) }
+  }
+  const cancelRegistration = () => {
+    storeRegistration(null); setRegistration(null); setAuthError(null); setAuthMessage(null)
   }
   const savePassword = async (password: string) => {
     if (!supabase || authBusy) return false
@@ -368,5 +397,5 @@ export function useShoppingList() {
     setCurrentUserId(null); setSignedIn(false); setSessionReady(false); setAuthMessage(null); setNeedsPassword(false)
   })
   const suggestions = useMemo(() => history.filter(p => !items.some(i => !i.checked && i.name.localeCompare(p.name, 'sk', { sensitivity: 'base' }) === 0)).sort((a, b) => b.count - a.count || b.lastUsed.localeCompare(a.lastUsed)), [history, items])
-  return { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount: Math.max(1, members.length), currentUserId, updateMemberName, loading, error, authMessage, authError, authBusy, needsPassword, authenticate, savePassword, clearAuthFeedback, signedIn, isOnline: isSupabaseConfigured, networkOnline, syncStatus, pendingCount: queue.length, retrySync, signOut, createHousehold, joinHousehold, leaveHousehold, renameHousehold }
+  return { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount: Math.max(1, members.length), currentUserId, updateMemberName, loading, error, authMessage, authError, authBusy, needsPassword, authenticate, registration, verifyRegistration, cancelRegistration, savePassword, clearAuthFeedback, signedIn, isOnline: isSupabaseConfigured, networkOnline, syncStatus, pendingCount: queue.length, retrySync, signOut, createHousehold, joinHousehold, leaveHousehold, renameHousehold }
 }
