@@ -3,7 +3,7 @@ import type { ShoppingItem } from './types'
 export type PendingOperation =
   | { id: string; type: 'save'; householdId: string; item: ShoppingItem; recordHistory?: boolean }
   | { id: string; type: 'edit'; householdId: string; itemId: string; name: string; quantity?: string; shop?: ShoppingItem['shop']; recordHistory?: boolean }
-  | { id: string; type: 'toggle'; householdId: string; itemId: string; checked: boolean; purchasedBy?: string }
+  | { id: string; type: 'toggle'; householdId: string; itemId: string; checked: boolean; purchasedBy?: string; purchasedAt?: string }
   | { id: string; type: 'remove'; householdId: string; itemId: string }
 
 // Replay only this household's pending changes over the latest server snapshot.
@@ -18,7 +18,12 @@ export function applyPending(items: ShoppingItem[], operations: readonly Pending
       if (!item) continue
       result.set(item.id, operation.type === 'edit'
         ? { ...item, name: operation.name, quantity: operation.quantity, shop: operation.shop }
-        : { ...item, checked: operation.checked, purchasedBy: operation.purchasedBy })
+        : {
+            ...item,
+            checked: operation.checked,
+            purchasedBy: operation.purchasedBy,
+            ...((operation.purchasedAt !== undefined || 'purchasedAt' in item) ? { purchasedAt: operation.purchasedAt } : {}),
+          })
     }
   }
   return [...result.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))

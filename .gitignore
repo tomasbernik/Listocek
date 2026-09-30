@@ -14,6 +14,7 @@ supabase/migrations/*.sql
 !supabase/migrations/202609140001_product_history_quantity.sql
 !supabase/migrations/202609140002_household_collaboration.sql
 !supabase/migrations/202609160001_reliable_sync_and_households.sql
+!supabase/migrations/202609220001_purchase_dates.sql
 
 # Generated local state from the Supabase CLI.
 supabase/.temp/

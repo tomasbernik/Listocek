@@ -13,9 +13,9 @@ const USER_KEY = 'listocek.user-id'
 const starterHistory: ProductHistory[] = [['Mlieko', 8], ['Vajcia', 7], ['Maslo', 6], ['Chlieb', 5], ['Cibuľa', 4], ['Strúhaný syr', 3]].map(([name, count]) => ({ name: String(name), count: Number(count), lastUsed: new Date(0).toISOString() }))
 
 type Household = { id: string; name: string; inviteCode: string }
-type DbItem = { id: string; name: string; quantity: string | null; shop: string | null; checked: boolean; created_at: string; created_by: string; purchased_by: string | null }
+type DbItem = { id: string; name: string; quantity: string | null; shop: string | null; checked: boolean; created_at: string; created_by: string; purchased_by: string | null; purchased_at: string | null }
 function read<T>(key: string, fallback: T): T { try { return JSON.parse(localStorage.getItem(key) ?? '') as T } catch { return fallback } }
-function mapItem(row: DbItem): ShoppingItem { return { id: row.id, name: row.name, quantity: row.quantity ?? undefined, shop: row.shop as Shop | undefined, checked: row.checked, createdAt: row.created_at, createdBy: row.created_by, purchasedBy: row.purchased_by ?? undefined } }
+function mapItem(row: DbItem): ShoppingItem { return { id: row.id, name: row.name, quantity: row.quantity ?? undefined, shop: row.shop as Shop | undefined, checked: row.checked, createdAt: row.created_at, createdBy: row.created_by, purchasedBy: row.purchased_by ?? undefined, purchasedAt: row.purchased_at ?? undefined } }
 function message(error: unknown) { return error && typeof error === 'object' && 'message' in error ? String(error.message) : 'Nepodarilo sa pripojiť. Skúste to znova.' }
 
 export function useShoppingList() {
@@ -75,7 +75,7 @@ export function useShoppingList() {
     try {
       const [houseResult, itemsResult, historyResult, membersResult] = await Promise.all([
         supabase.from('households').select('id,name,invite_code').eq('id', householdId).single(),
-        supabase.from('shopping_items').select('id,name,quantity,shop,checked,created_at,created_by,purchased_by').eq('household_id', householdId).order('created_at', { ascending: false }),
+        supabase.from('shopping_items').select('id,name,quantity,shop,checked,created_at,created_by,purchased_by,purchased_at').eq('household_id', householdId).order('created_at', { ascending: false }),
         supabase.from('product_history').select('display_name,use_count,preferred_shop,preferred_quantity,last_used_at').eq('household_id', householdId),
         supabase.from('household_members').select('user_id,display_name').eq('household_id', householdId),
       ])
@@ -246,7 +246,7 @@ export function useShoppingList() {
     const item = items.find(value => value.id === id)
     if (!item) return
     const checked = !item.checked
-    const operation: PendingOperation = { id: crypto.randomUUID(), type: 'toggle', householdId: household?.id ?? '', itemId: id, checked, purchasedBy: checked ? currentUserId ?? undefined : undefined }
+    const operation: PendingOperation = { id: crypto.randomUUID(), type: 'toggle', householdId: household?.id ?? '', itemId: id, checked, purchasedBy: checked ? currentUserId ?? undefined : undefined, purchasedAt: checked ? new Date().toISOString() : undefined }
     if (supabase) { if (household) enqueue([operation]) }
     else setServerItems(current => applyPending(current, [operation], ''))
   }, [currentUserId, enqueue, household, items])

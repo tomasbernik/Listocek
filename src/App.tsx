@@ -11,6 +11,21 @@ function normalizeSearch(value: string) {
   return value.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase('sk')
 }
 
+function localDateKey(value: string) {
+  const date = new Date(value)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function purchaseGroupTitle(value: string) {
+  const date = new Date(value)
+  const today = new Date()
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1)
+  const formatted = new Intl.DateTimeFormat('sk-SK', { day: 'numeric', month: 'long', year: 'numeric' }).format(date)
+  if (localDateKey(value) === localDateKey(today.toISOString())) return `Dnešný nákup · ${formatted}`
+  if (localDateKey(value) === localDateKey(yesterday.toISOString())) return `Včerajší nákup · ${formatted}`
+  return `Nákup · ${formatted}`
+}
+
 export default function App() {
   const { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount, currentUserId, updateMemberName, loading, error, authMessage, authError, authBusy, needsPassword, authenticate, savePassword, clearAuthFeedback, signedIn, isOnline, networkOnline, syncStatus, pendingCount, retrySync, signOut, createHousehold, joinHousehold, leaveHousehold, renameHousehold } = useShoppingList()
   const [name, setName] = useState('')
@@ -92,6 +107,19 @@ export default function App() {
     })
     return [...groups.entries()]
   }, [active])
+  const checkedGroups = useMemo(() => {
+    const groups = new Map<string, { purchasedAt: string; items: ShoppingItem[] }>()
+    checked.forEach(item => {
+      const purchasedAt = item.purchasedAt ?? item.createdAt
+      const key = localDateKey(purchasedAt)
+      const group = groups.get(key)
+      if (group) group.items.push(item)
+      else groups.set(key, { purchasedAt, items: [item] })
+    })
+    return [...groups.values()]
+      .sort((a, b) => b.purchasedAt.localeCompare(a.purchasedAt))
+      .map(group => ({ ...group, items: group.items.sort((a, b) => (b.purchasedAt ?? b.createdAt).localeCompare(a.purchasedAt ?? a.createdAt)) }))
+  }, [checked])
   const visibleSuggestions = useMemo(() => {
     const query = normalizeSearch(name.trim())
     return suggestions.filter(item => normalizeSearch(item.name).includes(query)).slice(0, 6)
@@ -216,10 +244,13 @@ export default function App() {
 
         {checked.length > 0 && <div className="checked-section">
           <div className="section-heading"><h2>Kúpené</h2><button onClick={clearCheckedWithUndo}><Trash2 size={14} />Vymazať</button></div>
-          <div className="item-card">{checked.map(item => <div className="item is-checked" key={item.id}>
-            <button className="checkbox" onClick={() => toggleItem(item.id)}><Check size={17} /></button>
-            <button className="item-name" onClick={() => openEditor(item)} aria-label={`Upraviť ${item.name}`}><span>{item.name}{item.quantity && <small>{item.quantity}</small>}</span>{memberNameFor(item.purchasedBy) && <em>Kúpil/a {memberNameFor(item.purchasedBy)}</em>}</button>
-            <button className="delete" onClick={() => removeWithUndo(item)} aria-label={`Odstrániť ${item.name}`}><Trash2 size={17} /></button>
+          <div className="purchase-groups">{checkedGroups.map(group => <div className="purchase-group" key={localDateKey(group.purchasedAt)}>
+            <div className="purchase-title"><span>{purchaseGroupTitle(group.purchasedAt)}</span><small>{group.items.length} {group.items.length === 1 ? 'položka' : group.items.length < 5 ? 'položky' : 'položiek'}</small></div>
+            <div className="item-card">{group.items.map(item => <div className="item is-checked" key={item.id}>
+              <button className="checkbox" onClick={() => toggleItem(item.id)} aria-label={`Vrátiť ${item.name} do nákupného zoznamu`}><Check size={17} /></button>
+              <button className="item-name" onClick={() => openEditor(item)} aria-label={`Upraviť ${item.name}`}><span>{item.name}{item.quantity && <small>{item.quantity}</small>}</span>{memberNameFor(item.purchasedBy) && <em>Kúpil/a {memberNameFor(item.purchasedBy)}</em>}</button>
+              <button className="delete" onClick={() => removeWithUndo(item)} aria-label={`Odstrániť ${item.name}`}><Trash2 size={17} /></button>
+            </div>)}</div>
           </div>)}</div>
         </div>}
       </section>

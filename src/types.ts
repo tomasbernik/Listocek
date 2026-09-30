@@ -9,6 +9,7 @@ export type ShoppingItem = {
   createdAt: string
   createdBy?: string
   purchasedBy?: string
+  purchasedAt?: string
 }
 
 export type HouseholdMember = { userId: string; displayName: string }
