@@ -42,8 +42,9 @@ jobs:
 
       - name: Build application
         env:
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_NEON_AUTH_URL: https://ep-spring-darkness-b2ag6387.neonauth.c-6.eu-central-1.aws.neon.tech/neondb/auth
+          VITE_NEON_DATA_API_URL: https://ep-spring-darkness-b2ag6387.apirest.c-6.eu-central-1.aws.neon.tech/neondb/rest/v1
+          VITE_NEON_REGISTER_FUNCTION_URL: https://br-withered-boat-b22aqbm3-listocekregister.compute.c-6.eu-central-1.aws.neon.tech/
         run: pnpm build
         
       - name: Configure GitHub Pages

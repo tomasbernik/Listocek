@@ -1,10 +1,10 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, SupabaseAuthAdapter } from '@neondatabase/neon-js'
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+const authUrl = import.meta.env.VITE_NEON_AUTH_URL as string | undefined
+const dataApiUrl = import.meta.env.VITE_NEON_DATA_API_URL as string | undefined
 
-export const isSupabaseConfigured = Boolean(url && key)
-export const supabase = isSupabaseConfigured ? createClient(url!, key!, {
-  auth: { persistSession: true, autoRefreshToken: true },
-  realtime: { params: { eventsPerSecond: 10 } },
+export const isSupabaseConfigured = Boolean(authUrl && dataApiUrl)
+export const supabase = isSupabaseConfigured ? createClient({
+  auth: { adapter: SupabaseAuthAdapter(), url: authUrl!, allowAnonymous: false },
+  dataApi: { url: dataApiUrl!, options: { db: { schema: 'public' } } },
 }) : null

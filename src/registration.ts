@@ -1,5 +1,3 @@
-import { supabase } from './supabase'
-
 export type PendingRegistration = { email: string; resendAt: number }
 const key = 'listocek.registration'
 export function readRegistration(): PendingRegistration | null {
@@ -15,14 +13,16 @@ export function storeRegistration(value: PendingRegistration | null) {
   } catch { /* The flow still works in memory when storage is unavailable. */ }
 }
 export async function sendRegistrationCode(email: string) {
-  if (!supabase) throw new Error('Registrácia nie je dostupná.')
-  const { data, error } = await supabase.functions.invoke('listocek-register', { body: { email } })
-  if (error) {
-    let detail: string | undefined
-    if ('context' in error && error.context instanceof Response) {
-      try { detail = (await error.context.json()).error } catch { /* Gateway may return non-JSON. */ }
-    }
-    throw new Error(detail || 'Kód sa nepodarilo odoslať. Skúste to o chvíľu znova.')
+  const url = import.meta.env.VITE_NEON_REGISTER_FUNCTION_URL as string | undefined
+  if (!url) throw new Error('Registrácia nie je dostupná.')
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  })
+  let data: { sent?: boolean; error?: string } = {}
+  try { data = await response.json() } catch { /* Gateway may return non-JSON. */ }
+  if (!response.ok || data.sent !== true) {
+    throw new Error(data.error || 'Kód sa nepodarilo odoslať. Skúste to o chvíľu znova.')
   }
-  if (data?.sent !== true) throw new Error('Kód sa nepodarilo odoslať. Skúste to o chvíľu znova.')
 }

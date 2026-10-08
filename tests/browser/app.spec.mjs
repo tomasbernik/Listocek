@@ -4,36 +4,30 @@ const userId = '11111111-1111-4111-8111-111111111111'
 const home = { id: '22222222-2222-4222-8222-222222222222', name: 'U ocina', invite_code: 'AB12CD34' }
 const otherHome = { id: '33333333-3333-4333-8333-333333333333', name: 'Druhá rodina', invite_code: '1234ABCD' }
 const milk = { id: '44444444-4444-4444-8444-444444444444', name: 'Mlieko', quantity: null, shop: null, checked: false, created_at: '2026-09-16T10:00:00Z', created_by: userId, purchased_by: null }
-const session = { access_token: 'test-access-token', refresh_token: 'test-refresh-token', expires_at: Math.floor(Date.now() / 1000) + 86400, expires_in: 86400, token_type: 'bearer', user: { id: userId, email: 'oco@example.test', aud: 'authenticated', role: 'authenticated', user_metadata: { listocek_password_set: true } } }
+const betterUser = { id: userId, email: 'oco@example.test', emailVerified: true, name: 'Oco', image: null, createdAt: '2026-09-01T10:00:00Z', updatedAt: '2026-10-08T10:00:00Z' }
+const betterSession = { id: 'session-1', userId, token: 'test-access-token', expiresAt: '2026-10-09T10:00:00Z', createdAt: '2026-10-08T10:00:00Z', updatedAt: '2026-10-08T10:00:00Z' }
 
 async function prepare(page, options = {}) {
-  const state = { household: options.noHousehold ? null : { ...home }, items: [{ ...milk }], failReads: false, operations: [], beforeSend: null, otpRedirect: '' }
-  await page.addInitScript(({ session, signedIn }) => {
-    if (signedIn && !localStorage.getItem('sb-listocek-test-auth-token')) localStorage.setItem('sb-listocek-test-auth-token', JSON.stringify(session))
+  const state = { signedIn: !options.signedOut, household: options.noHousehold ? null : { ...home }, items: [{ ...milk }], failReads: false, operations: [], beforeSend: null }
+  await page.addInitScript(() => {
     window.testOnline = localStorage.getItem('test-offline') !== 'true'
     Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => window.testOnline })
     Object.defineProperty(navigator, 'share', { configurable: true, value: async data => { window.sharedInvitation = data } })
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async text => { window.copiedInvitation = text } } })
-  }, { session: options.legacy ? { ...session, user: { ...session.user, user_metadata: {} } } : session, signedIn: !options.signedOut })
-  await page.route('https://fonts.googleapis.com/**', route => route.abort())
-  await page.routeWebSocket('wss://listocek-test.supabase.co/**', socket => {
-    socket.onMessage(message => {
-      const [joinRef, ref, topic, event, payload] = JSON.parse(String(message))
-      const response = event === 'phx_join' ? { postgres_changes: (payload.config?.postgres_changes ?? []).map((change, id) => ({ ...change, id })) } : {}
-      socket.send(JSON.stringify([joinRef, ref, topic, 'phx_reply', { status: 'ok', response }]))
-    })
   })
-  await page.route('https://listocek-test.supabase.co/**', async route => {
+  await page.route('https://fonts.googleapis.com/**', route => route.abort())
+  await page.route('https://listocek-register.test/**', async route => {
+    state.registration = route.request().postDataJSON()
+    state.codeRequests = (state.codeRequests ?? 0) + 1
+    await route.fulfill({ status: 200, json: { sent: true } })
+  })
+  await page.route(/https:\/\/listocek-test\.(?:neonauth|apirest)\.example\/.*/, async route => {
     const request = route.request(), url = new URL(request.url())
     const body = request.method() === 'POST' || request.method() === 'PATCH' || request.method() === 'PUT' ? request.postDataJSON() : null
     let data = null
-    if (url.pathname.endsWith('/functions/v1/listocek-register')) { state.registration = body; state.codeRequests = (state.codeRequests ?? 0) + 1; data = { sent: true } }
-    else if (url.pathname.endsWith('/verify')) { state.verification = body; data = { ...session, user: { ...session.user, user_metadata: {} } } }
-    else if (url.pathname.endsWith('/otp')) { state.otpRedirect = url.searchParams.get('redirect_to'); data = {} }
-    else if (url.pathname.endsWith('/logout')) data = {}
-    else if (url.pathname.endsWith('/recover')) { state.recoveryRedirect = url.searchParams.get('redirect_to'); data = {} }
-    else if (url.pathname.endsWith('/token')) { state.login = body; data = session }
-    else if (url.pathname.endsWith('/user')) { if (request.method() === 'PUT') state.userUpdate = body; data = { ...session.user, user_metadata: { ...session.user.user_metadata, ...body?.data } } }
+    if (url.pathname.endsWith('/get-session')) data = state.signedIn ? { session: betterSession, user: betterUser } : null
+    else if (url.pathname.endsWith('/sign-in/email-otp')) { state.verification = body; state.signedIn = true; data = { token: betterSession.token, user: betterUser } }
+    else if (url.pathname.endsWith('/sign-out')) { state.signedIn = false; data = { success: true } }
     else if (url.pathname.endsWith('/rpc/apply_shopping_operation')) {
       const operation = body.operation
       state.operations.push(operation)
@@ -61,24 +55,18 @@ async function prepare(page, options = {}) {
   return state
 }
 
-test('registration code survives reload, sets a password and preserves the household invitation', async ({ page }) => {
+test('registration code survives reload, signs in and preserves the household invitation', async ({ page }) => {
   const state = await prepare(page, { signedOut: true, noHousehold: true })
   await page.goto('?invite=AB12CD34')
   await page.getByLabel('E-mailová adresa').fill('oco@example.test')
-  await page.getByRole('button', { name: 'Vytvoriť účet / ešte nemám heslo' }).click()
-  await page.getByRole('button', { name: 'Poslať overovací kód' }).click()
+  await page.getByRole('button', { name: 'Poslať prihlasovací kód' }).click()
   await expect(page.getByLabel('Overovací kód')).toBeVisible()
   await page.screenshot({ path: 'test-results/registration-code-mobile.png', fullPage: true })
   expect(state.registration).toEqual({ email: 'oco@example.test' })
-  expect(state.otpRedirect).toBe('')
   await page.reload()
   await page.getByLabel('Overovací kód').fill('123456')
   await page.getByRole('button', { name: 'Overiť kód', exact: true }).click()
-  expect(state.verification).toMatchObject({ email: 'oco@example.test', token: '123456', type: 'email' })
-  await page.getByLabel('Nové heslo', { exact: true }).fill('test-password-123')
-  await page.getByLabel('Zopakujte heslo').fill('test-password-123')
-  await page.getByRole('button', { name: 'Uložiť heslo a pokračovať' }).click()
-  expect(state.userUpdate.password).toBe('test-password-123')
+  expect(state.verification).toEqual({ email: 'oco@example.test', otp: '123456' })
   await expect(page.getByLabel('Pozývací kód')).toHaveValue('AB12CD34')
   await page.getByLabel('Ako sa voláte?').fill('Oco')
   await page.getByRole('button', { name: 'Pripojiť sa', exact: true }).click()
@@ -89,11 +77,10 @@ test('registration code survives reload, sets a password and preserves the house
 test('invalid code can be retried, resend is delayed and email can be corrected', async ({ page }) => {
   const state = await prepare(page, { signedOut: true })
   await page.goto('./')
-  await page.getByRole('button', { name: 'Vytvoriť účet / ešte nemám heslo' }).click()
   await page.getByLabel('E-mailová adresa').fill('new@example.test')
-  await page.getByRole('button', { name: 'Poslať overovací kód' }).click()
+  await page.getByRole('button', { name: 'Poslať prihlasovací kód' }).click()
   await expect(page.getByRole('button', { name: /Poslať nový kód/ })).toBeDisabled()
-  await page.route('**/auth/v1/verify', route => route.fulfill({ status: 403, json: { code: 'otp_expired', msg: 'Token has expired or is invalid' } }))
+  await page.route('**/sign-in/email-otp', route => route.fulfill({ status: 403, json: { code: 'otp_expired', message: 'Token has expired or is invalid' } }))
   await page.getByLabel('Overovací kód').fill('999999')
   await page.getByRole('button', { name: 'Overiť kód', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Kód je nesprávny alebo vypršal')
@@ -115,11 +102,10 @@ test('invalid code can be retried, resend is delayed and email can be corrected'
 
 test('failed code delivery stays on email entry and reports a useful error', async ({ page }) => {
   await prepare(page, { signedOut: true })
-  await page.route('**/functions/v1/listocek-register', route => route.fulfill({ status: 503, json: { error: 'Kód sa nepodarilo odoslať. Skúste to o chvíľu znova.' } }))
+  await page.route('https://listocek-register.test/**', route => route.fulfill({ status: 503, json: { error: 'Kód sa nepodarilo odoslať. Skúste to o chvíľu znova.' } }))
   await page.goto('./')
-  await page.getByRole('button', { name: 'Vytvoriť účet / ešte nemám heslo' }).click()
   await page.getByLabel('E-mailová adresa').fill('new@example.test')
-  await page.getByRole('button', { name: 'Poslať overovací kód' }).click()
+  await page.getByRole('button', { name: 'Poslať prihlasovací kód' }).click()
   await expect(page.getByRole('alert')).toContainText('Kód sa nepodarilo odoslať')
   await expect(page.getByLabel('Overovací kód')).toHaveCount(0)
 })
@@ -137,75 +123,6 @@ test('share menu, copy and email prepare the same invitation without sending a m
   await page.getByRole('button', { name: 'Zdieľať pozvanie' }).click()
   await expect(page.getByRole('status')).toContainText('Vyberte e-mail')
   await page.screenshot({ path: 'test-results/members-mobile.png', fullPage: true })
-})
-
-test('password login opens the saved household without sending an email', async ({ page }) => {
-  const state = await prepare(page, { signedOut: true })
-  await page.goto('./')
-  await page.getByLabel('E-mailová adresa').fill('oco@example.test')
-  await page.getByLabel('Heslo', { exact: true }).fill('existing-password')
-  await page.getByRole('button', { name: 'Prihlásiť sa', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toBeVisible()
-  expect(state.login).toMatchObject({ email: 'oco@example.test', password: 'existing-password' })
-  expect(state.otpRedirect).toBe('')
-  await page.reload()
-  await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toBeVisible()
-})
-
-test('wrong password remains on login and does not send email', async ({ page }) => {
-  const state = await prepare(page, { signedOut: true })
-  await page.route('**/auth/v1/token?**', route => route.fulfill({ status: 400, json: { code: 'invalid_credentials', msg: 'Invalid login credentials' } }))
-  await page.goto('./')
-  await page.getByLabel('E-mailová adresa').fill('oco@example.test')
-  await page.getByLabel('Heslo', { exact: true }).fill('wrong-password')
-  await page.getByRole('button', { name: 'Prihlásiť sa', exact: true }).click()
-  await expect(page.getByRole('alert')).toContainText('Nesprávny e-mail alebo heslo')
-  expect(state.otpRedirect).toBe('')
-  await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toHaveCount(0)
-})
-
-test('legacy session sets a password without another email and handles server rejection', async ({ page }) => {
-  const state = await prepare(page, { legacy: true })
-  await page.goto('./')
-  await page.getByLabel('Nové heslo', { exact: true }).fill('new-password')
-  await page.getByLabel('Zopakujte heslo').fill('new-password')
-  await page.route('**/auth/v1/user', async route => {
-    if (route.request().method() !== 'PUT') return route.fallback()
-    await route.fulfill({ status: 422, json: { code: 'weak_password', msg: 'Heslo je príliš slabé.' } })
-  })
-  await page.getByRole('button', { name: 'Uložiť heslo a pokračovať' }).click()
-  await expect(page.getByRole('alert')).toContainText('Heslo je príliš slabé')
-  await expect(page.getByLabel('Nové heslo', { exact: true })).toBeVisible()
-  await page.unroute('**/auth/v1/user')
-  await page.getByRole('button', { name: 'Uložiť heslo a pokračovať' }).click()
-  await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toBeVisible()
-  expect(state.otpRedirect).toBe('')
-  await page.reload()
-  await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toBeVisible()
-})
-
-test('recovery preserves invitation and requires matching passwords', async ({ page }) => {
-  const state = await prepare(page, { signedOut: true })
-  await page.goto('?invite=AB12CD34')
-  await page.getByRole('button', { name: 'Zabudnuté heslo', exact: true }).click()
-  await page.getByLabel('E-mailová adresa').fill('oco@example.test')
-  await page.getByRole('button', { name: 'Poslať odkaz na obnovu hesla' }).click()
-  await expect(page.getByRole('status')).toContainText('Ak účet existuje')
-  expect(state.recoveryRedirect).toContain('auth=password')
-  expect(state.recoveryRedirect).toContain('invite=AB12CD34')
-  await page.evaluate(session => localStorage.setItem('sb-listocek-test-auth-token', JSON.stringify(session)), session)
-  await page.goto('?auth=password')
-  await page.reload()
-  await page.getByLabel('Nové heslo', { exact: true }).fill('new-password')
-  await page.getByLabel('Zopakujte heslo').fill('different-password')
-  await page.getByRole('button', { name: 'Uložiť heslo a pokračovať' }).click()
-  await expect(page.getByRole('alert')).toContainText('Heslá sa nezhodujú')
-  expect(state.userUpdate).toBeUndefined()
-  await page.getByLabel('Zopakujte heslo').fill('new-password')
-  await page.getByRole('button', { name: 'Uložiť heslo a pokračovať' }).click()
-  await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toBeVisible()
-  expect(state.userUpdate.password).toBe('new-password')
-  expect(new URL(page.url()).searchParams.has('auth')).toBe(false)
 })
 
 test('a pending invitation remains available after leaving the old household', async ({ page }) => {
@@ -228,7 +145,7 @@ test('failed reads keep existing items and retry works even without pending writ
   await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toBeVisible()
   state.failReads = true
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  // The Supabase client retries 503 reads with exponential backoff before reporting failure.
+  // The Data API client retries 503 reads with exponential backoff before reporting failure.
   await expect(page.locator('.sync-error')).toContainText('Testovací výpadok', { timeout: 12000 })
   await expect(page.getByRole('button', { name: 'Upraviť Mlieko' })).toBeVisible()
   state.failReads = false

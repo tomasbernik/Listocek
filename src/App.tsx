@@ -27,7 +27,7 @@ function purchaseGroupTitle(value: string) {
 }
 
 export default function App() {
-  const { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount, currentUserId, updateMemberName, loading, error, authMessage, authError, authBusy, needsPassword, authenticate, registration, verifyRegistration, cancelRegistration, savePassword, clearAuthFeedback, signedIn, isOnline, networkOnline, syncStatus, pendingCount, retrySync, signOut, createHousehold, joinHousehold, leaveHousehold, renameHousehold } = useShoppingList()
+  const { items, suggestions, addItem, updateItem, toggleItem, removeItem, clearChecked, restoreItems, household, members, memberCount, currentUserId, updateMemberName, loading, error, authError, authBusy, authenticate, registration, verifyRegistration, cancelRegistration, clearAuthFeedback, signedIn, isOnline, networkOnline, syncStatus, pendingCount, retrySync, signOut, createHousehold, joinHousehold, leaveHousehold, renameHousehold } = useShoppingList()
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState('')
   const [shop, setShop] = useState<Shop | ''>('')
@@ -174,11 +174,11 @@ export default function App() {
 
   const memberNameFor = (userId?: string) => members.find(member => member.userId === userId)?.displayName
 
-  if (isOnline && ((loading && !household) || !signedIn || needsPassword)) return <AuthScreen
-    loading={loading && !signedIn} busy={authBusy} setup={signedIn && needsPassword}
-    inviteCode={normalizeInvite(joinCode)} error={authError} message={authMessage}
+  if (isOnline && ((loading && !household) || !signedIn)) return <AuthScreen
+    loading={loading && !signedIn} busy={authBusy}
+    inviteCode={normalizeInvite(joinCode)} error={authError}
     registration={registration} verifyRegistration={verifyRegistration} cancelRegistration={cancelRegistration}
-    authenticate={authenticate} savePassword={savePassword} clearFeedback={clearAuthFeedback}
+    authenticate={authenticate} clearFeedback={clearAuthFeedback}
   />
   if (isOnline && !household) return <main className="app-shell onboarding">
     <div className="brand-mark large"><ListChecks size={32} /></div><p className="eyebrow">VAŠA DOMÁCNOSŤ</p><h1>Spoločný zoznam</h1>
@@ -289,7 +289,7 @@ export default function App() {
             <button className="danger-button" disabled={managementDisabled} onClick={() => void leaveCurrentHousehold()}>Opustiť domácnosť</button>
             <button className="text-button" disabled={loading} onClick={() => setConfirmLeave(false)}>Zostať v domácnosti</button>
           </div> : <button className="text-button danger-text" onClick={() => setConfirmLeave(true)}>Opustiť domácnosť</button>}
-          <button className="text-button" disabled={managementDisabled} onClick={() => void signOut()}><LogOut size={14} />Odhlásiť sa</button></> : <p>Po pripojení Supabase tu bude pozývací kód pre ďalších členov.</p>}
+          <button className="text-button" disabled={managementDisabled} onClick={() => void signOut()}><LogOut size={14} />Odhlásiť sa</button></> : <p>Po pripojení Neon tu bude pozývací kód pre ďalších členov.</p>}
       </section></div>}
       {editingItem && <div className="modal-backdrop" onClick={() => setEditingItem(null)}><section className="modal edit-modal" onClick={e => e.stopPropagation()}>
         <button className="modal-close" onClick={() => setEditingItem(null)} aria-label="Zavrieť"><X size={20} /></button>
